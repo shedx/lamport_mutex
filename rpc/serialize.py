@@ -2,7 +2,8 @@ import json
 
 
 def serialize(**kwargs):
-    return json.dumps(kwargs).encode('utf-8')
+    return json.dumps(kwargs).encode('utf-8') + b'\n'
+    # add \n so there is no need to distinguish from console input
 
 
 def deserialize(bytes):
