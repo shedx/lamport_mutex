@@ -28,11 +28,11 @@ for i in range(10):
         stdout=sys.stdout
     ))
 
-time.sleep(5)
+time.sleep(6)
 
 for _, write_fd in pipes:
     os.write(write_fd, b'{"callback": "STRESSMODE_START"}\n')
 
-time.sleep(10)
+time.sleep(5)
 for pr in processes:
     pr.kill()

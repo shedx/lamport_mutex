@@ -2,7 +2,7 @@ import time
 import fcntl
 
 from rpc.constants import STDIN, REMOTE
-
+from .logger import LamportLogger
 
 class Lamport:
     def __init__(self, rpc, mutex_file):
@@ -12,8 +12,9 @@ class Lamport:
         self.clock = 0
         self.stress_mode = False
         self.mutex_file = mutex_file
+        self.logger = LamportLogger(self._rpc.id)
 
-    def request(self, req):
+    def request_handler(self, req):
         self.queue.append(
             (req['clocks'], self._rpc.addrs.index(req['host']))
         )
@@ -23,19 +24,20 @@ class Lamport:
             self._rpc.fd_by_host[req['host']], 'ACKNOW'
         )
 
-    def acknowledgement(self, req):
+    def acknowledgement_handler(self, req):
         self.unreceived_ack.remove(req['host'])
 
-    def release(self, req):
+    def release_handler(self, req):
+        self.clock = max(self.clock, req['clocks']) + 1
         self.queue = [
             (clock, host_id) for clock, host_id in self.queue
             if host_id != self._rpc.addrs.index(req['host'])
             ]
 
-    def acquire(self):
-        self.clock += 1
+    def request(self):
         self.queue.append((self.clock, self._rpc.id))
         self.queue.sort()
+        self.logger.log(self.clock, 'REQUEST')
         self._rpc.broadcast('REQUEST', clocks=self.clock)
         for i, addr in enumerate(self._rpc.addrs):
             if i == self._rpc.id:
@@ -43,25 +45,26 @@ class Lamport:
             self.unreceived_ack.add(addr)
 
     def start_stress_mode(self):
-        self.acquire()
+        self.request()
         self.stress_mode = True
 
     def get_mutex(self):
         mutex = open(self.mutex_file, 'a')
-        fcntl.flock(mutex, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        mutex.write('pid: {} clock: {} real_time: {}\n' \
+        self.logger.log(self.clock, "ACQUIRE")
+        mutex.write('pid: {} clock: {} real_time: {} locked\n' \
                     .format(self._rpc.id, self.clock, time.time()))
+        fcntl.flock(mutex, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.clock += 1
         fcntl.flock(mutex, fcntl.F_UNLCK)
+        mutex.write('pid: {} clock: {} real_time: {} unlocked\n' \
+                    .format(self._rpc.id, self.clock, time.time()))
+        self.logger.log(self.clock, 'RELEASE')
         mutex.close()
 
     def check(self):
         if self.queue and self.queue[0][1] == self._rpc.id \
                 and not self.unreceived_ack:
-            print('{} locked mutex'.format(self._rpc.id))
             self.get_mutex()
-            self.clock += 1
-            print('{} unlocked mutex'.format(self._rpc.id))
-
             self.queue = [
                 (clock, host_id) for clock, host_id in self.queue
                 if host_id != self._rpc.id
@@ -70,13 +73,13 @@ class Lamport:
             self._rpc.broadcast('RELEASE', clocks=self.clock)
 
             if self.stress_mode:
-                self.acquire()
+                self.request()
 
     def run(self):
         for req_type, data in self._rpc.run():
             if req_type == STDIN:
                 if data['callback'] == 'ACQUIRE':
-                    self.acquire()
+                    self.request()
                 elif data['callback'] == 'STRESSMODE_START':
                     self.start_stress_mode()
                 else:
@@ -87,10 +90,10 @@ class Lamport:
                 #  and list is unhashable so we can't use it as a key
                 data['host'] = tuple(data['host'])
                 if data['callback'] == 'REQUEST':
-                    self.request(data)
+                    self.request_handler(data)
                 elif data['callback'] == 'ACKNOW':
-                    self.acknowledgement(data)
+                    self.acknowledgement_handler(data)
                     self.check()
                 elif data['callback'] == 'RELEASE':
-                    self.release(data)
+                    self.release_handler(data)
                     self.check()
