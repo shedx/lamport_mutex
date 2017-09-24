@@ -7,3 +7,6 @@ create processess manually: python3 spawn.py -i 0.0.0.0 -p 8080 --addrs 0.0.0.0:
 
 
 run logs analyzer: python3 check_logs.py
+
+
+run unit tests: python3 test_local_rpc.py
