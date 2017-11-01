@@ -1,5 +1,11 @@
 # lamport_mutex
 
+Lamport's distributed mutual exclusion algorithm implementation
+
+
+http://amturing.acm.org/p558-lamport.pdf
+
+
 run local stress tests: python3 test_local_rpc.py
 
 
